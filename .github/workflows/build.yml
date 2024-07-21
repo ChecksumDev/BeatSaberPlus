@@ -1,0 +1,103 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    strategy:
+      matrix:
+        version: [1.25.0, 1.26.0, 1.27.0, 1.28.0, 1.29.1, 1.34.2]
+        mod:
+          [
+            "BeatSaberPlus_Chat",
+            "BeatSaberPlus_ChatEmoteRain",
+            "BeatSaberPlus_ChatIntegrations",
+            "BeatSaberPlus_ChatRequest",
+            "BeatSaberPlus_GameTweaker",
+            "BeatSaberPlus_MenuMusic",
+            "BeatSaberPlus_NoteTweaker",
+            "BeatSaberPlus_SongChartVisualizer",
+            "BeatSaberPlus_SongOverlay",
+          ]
+
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+
+      - name: Cache .NET packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Modules/**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-nuget
+
+      - name: Cache .NET build intermediate files
+        uses: actions/cache@v3
+        with:
+          path: |
+            **/obj
+            **/bin
+          key: ${{ runner.os }}-build-${{ hashFiles('**/Modules/**/*.csproj') }}-${{ matrix.version }}-${{ matrix.mod }}
+          restore-keys: |
+            ${{ runner.os }}-build-${{ hashFiles('**/Modules/**/*.csproj') }}-${{ matrix.version }}
+            ${{ runner.os }}-build-${{ hashFiles('**/Modules/**/*.csproj') }}
+
+      - name: Cache Chocolatey Downloads
+        uses: actions/cache@v3
+        with:
+          path: C:/ProgramData/chocolatey/lib
+          key: ${{ runner.os }}-choco-${{ hashFiles('**/Modules/**/*.csproj') }}
+          restore-keys: ${{ runner.os }}-choco
+
+      - name: Install .NET Framework 4.8 Developer Pack
+        run: choco install dotnetfx --ignore-checksums
+
+      - name: Initialize modding environment for ChatPlexSDK-BS
+        uses: beat-forge/init-beatsaber@v1
+        with:
+          manifest: "ChatPlexSDK-BS/manifest.json"
+          path: ./Refs/ChatPlexSDK-BS/
+
+      - name: Download Mod Dependencies for ChatPlexSDK-BS
+        uses: Goobwabber/download-beatmods-deps@1.2
+        with:
+          manifest: "ChatPlexSDK-BS/manifest.json"
+          path: ./Refs/ChatPlexSDK-BS/
+
+      - name: Debug Refs Folder
+        run: ls -R ./Refs
+
+      - name: Restore NuGet Packages for ChatPlexSDK-BS
+        run: dotnet restore ChatPlexSDK-BS
+
+      - name: Build ChatPlexSDK-BS
+        run: dotnet build --configuration Release ChatPlexSDK-BS /p:BeatSaberDir=${{ github.workspace }}/Refs/ChatPlexSDK-BS
+
+      - name: Initialize modding environment for ${{ matrix.mod }}
+        uses: beat-forge/init-beatsaber@v1
+        with:
+          path: ./Refs/BSP/
+          manifest: "Modules/${{ matrix.mod }}/manifest.json"
+
+      - name: Download Mod Dependencies for ${{ matrix.mod }}
+        uses: Goobwabber/download-beatmods-deps@1.2
+        with:
+          path: ./Refs/BSP/
+          manifest: "Modules/${{ matrix.mod }}/manifest.json"
+
+      - name: Debug Refs Folder
+        run: ls -R ./Refs
+
+      - name: Restore NuGet Packages for ${{ matrix.mod }}
+        run: dotnet restore Modules/${{ matrix.mod }}
+
+      - name: Build Module ${{ matrix.mod }}
+        run: dotnet build --configuration Release Modules/${{ matrix.mod }} /p:BeatSaberDir=${{ github.workspace }}/Refs
+        continue-on-error: true
